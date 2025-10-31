@@ -1,5 +1,6 @@
 #include <chrono>   // std::chrono::seconds()
 #include <functional>
+#include <future>
 #include <queue>
 #include <stdio.h>
 #include <stdlib.h> // atoi()
@@ -15,8 +16,15 @@ public:
     ThreadPool(int);
     ~ThreadPool();
 
+    // v1
+    // - all pending jobs are canceled upon shutdown
     void push(std::function<void()>);
-    void shutdown();
+
+    // v2
+    template <typename F, typename... Args>
+        std::future<typename std::result_of<F(Args...)>::type> push(
+                F f, Args... args
+                );
 
 private:
     std::vector<std::thread> _workers;
@@ -60,6 +68,29 @@ void ThreadPool::push(std::function<void()> job)
     }
 }
 
+template <typename F, typename... Args>
+std::future<typename std::result_of<F(Args...)>::type> ThreadPool::push(
+        F f,
+        Args... args)
+{
+    using return_type = typename std::result_of<F(Args...)>::type;
+    auto job = std::make_shared<std::packaged_task<return_type()>>(std::bind(f, args...));
+    std::future<return_type> job_future = job->get_future();
+
+    if ( !_shutdown_flag )
+    {
+        {
+            std::lock_guard<std::mutex> lock(_mtx);
+            _jobs.push( [job]() {
+                    (*job)();
+                    } );
+        }
+        _cv.notify_one();
+    }
+
+    return job_future;
+}
+
 void ThreadPool::run()
 {
     printf("worker thread start...\n");
@@ -75,7 +106,6 @@ void ThreadPool::run()
         _jobs.pop();
         lock.unlock();
 
-        printf("job start...\n");
         job();
     }
 }
@@ -92,16 +122,27 @@ int main(int argc, char* argv[])
     int nj = atoi(argv[2]);
 
     ThreadPool pool(nw);
+    std::vector<std::future<int>> futures;
 
     for ( int i = 1; i <= nj; i++ )
     {
         printf("push job[%d]\n", i);
+/*
         pool.push( [i]() {
-                printf("%d: start...\n", i);
+                printf("job[%d] start...\n", i);
                 std::this_thread::sleep_for( std::chrono::seconds(1) );
-                printf("%d: end...\n", i);
+                printf("job[%d] end...\n", i);
                 } );
+*/
+        futures.push_back(
+                pool.push( [](int t, int id) {
+                    printf("job[%d] start\n", id);
+                    std::this_thread::sleep_for( std::chrono::seconds(t) );
+                    printf("job[%d] end after %ds\n", id, t);
+                    return id;
+                    }, i % 3 + 1, i));
     }
 
-    sleep(2);
+    for ( auto& f : futures )
+        printf("result: %d\n", f.get());
 }
