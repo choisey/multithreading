@@ -17,7 +17,8 @@ public:
     ~ThreadPool();
 
     // v1
-    // - all pending jobs are canceled upon shutdown
+    // - background job do not return value
+    // - all pending jobs are canceled when the thread pool shuts down
     void push(std::function<void()>);
 
     // v2
@@ -47,6 +48,8 @@ ThreadPool::ThreadPool(int num_threads)
 
 ThreadPool::~ThreadPool()
 {
+    printf("ThreadPool shutting down...\n");
+
     _shutdown_flag = true;
     _cv.notify_all();
 
@@ -73,9 +76,13 @@ std::future<typename std::result_of<F(Args...)>::type> ThreadPool::push(
         F f,
         Args... args)
 {
-    using return_type = typename std::result_of<F(Args...)>::type;
-    auto job = std::make_shared<std::packaged_task<return_type()>>(std::bind(f, args...));
-    std::future<return_type> job_future = job->get_future();
+    // result_of deprecated in C++17 and removed in C++20
+    // using return_type = typename std::result_of<F(Args...)>::type;
+    using result_t = typename std::invoke_result<F, Args...>::type;
+    auto job = std::make_shared<std::packaged_task<result_t()>>(
+            std::bind(f, args...)
+            );
+    std::future<result_t> job_future = job->get_future();
 
     if ( !_shutdown_flag )
     {
@@ -122,20 +129,28 @@ int main(int argc, char* argv[])
     int nj = atoi(argv[2]);
 
     ThreadPool pool(nw);
-    std::vector<std::future<int>> futures;
+
+    // simple job with no return value
 
     for ( int i = 1; i <= nj; i++ )
     {
         printf("push job[%d]\n", i);
-/*
         pool.push( [i]() {
                 printf("job[%d] start...\n", i);
                 std::this_thread::sleep_for( std::chrono::seconds(1) );
                 printf("job[%d] end...\n", i);
                 } );
-*/
+    }
+
+    // return values can be obtained using std::future
+
+    std::vector<std::future<int>> futures;
+
+    for ( int i = 1; i <= nj; i++ )
+    {
+        printf("push job[%d]\n", i);
         futures.push_back(
-                pool.push( [](int t, int id) {
+                pool.push( [](int t, int id) -> int {
                     printf("job[%d] start\n", id);
                     std::this_thread::sleep_for( std::chrono::seconds(t) );
                     printf("job[%d] end after %ds\n", id, t);
