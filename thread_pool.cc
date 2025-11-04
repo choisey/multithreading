@@ -6,7 +6,6 @@
 #include <stdlib.h> // atoi()
 #include <thread>
 #include <condition_variable>
-#include <unistd.h> // sleep()
 
 // thread pool
 
@@ -19,11 +18,11 @@ public:
     // v1
     // - background job do not return value
     // - all pending jobs are canceled when the thread pool shuts down
-    void push(std::function<void()>);
+    void enqueue(std::function<void()>);
 
     // v2
     template <typename F, typename... Args>
-        std::future<typename std::result_of<F(Args...)>::type> push(
+        std::future<typename std::result_of<F(Args...)>::type> enqueue(
                 F f, Args... args
                 );
 
@@ -59,7 +58,7 @@ ThreadPool::~ThreadPool()
     printf("# incomplete jobs %lu\n", _jobs.size());
 }
 
-void ThreadPool::push(std::function<void()> job)
+void ThreadPool::enqueue(std::function<void()> job)
 {
     if ( !_shutdown_flag )
     {
@@ -72,7 +71,7 @@ void ThreadPool::push(std::function<void()> job)
 }
 
 template <typename F, typename... Args>
-std::future<typename std::result_of<F(Args...)>::type> ThreadPool::push(
+std::future<typename std::result_of<F(Args...)>::type> ThreadPool::enqueue(
         F f,
         Args... args)
 {
@@ -134,8 +133,8 @@ int main(int argc, char* argv[])
 
     for ( int i = 1; i <= nj; i++ )
     {
-        printf("push job[%d]\n", i);
-        pool.push( [i]() {
+        printf("enqueue job[%d]\n", i);
+        pool.enqueue( [i]() {
                 printf("job[%d] start...\n", i);
                 std::this_thread::sleep_for( std::chrono::seconds(1) );
                 printf("job[%d] end...\n", i);
@@ -148,9 +147,9 @@ int main(int argc, char* argv[])
 
     for ( int i = 1; i <= nj; i++ )
     {
-        printf("push job[%d]\n", i);
+        printf("enqueue job[%d]\n", i);
         futures.push_back(
-                pool.push( [](int t, int id) -> int {
+                pool.enqueue( [](int t, int id) -> int {
                     printf("job[%d] start\n", id);
                     std::this_thread::sleep_for( std::chrono::seconds(t) );
                     printf("job[%d] end after %ds\n", id, t);
